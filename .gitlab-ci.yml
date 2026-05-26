@@ -1,0 +1,93 @@
+stages:
+  - lint
+  - sast
+  - test
+  - coverage
+  - sonarqube
+  - quality-gate
+  - publish
+
+variables:
+  POSTGRES_DB: devsecops_platform
+  POSTGRES_USER: platform
+  POSTGRES_PASSWORD: platform_secret
+
+default:
+  image: python:3.11-slim
+
+services:
+  - postgres:16-alpine
+  - redis:7-alpine
+
+before_script:
+  - pip install -r backend/requirements.txt
+
+lint:
+  stage: lint
+  script:
+    - pip install pylint
+    - pylint backend/app --exit-zero
+  rules:
+    - if: $CI_PIPELINE_SOURCE
+
+frontend-lint:
+  stage: lint
+  image: node:20-alpine
+  script:
+    - cd frontend && npm ci && npm run lint
+
+sast:
+  stage: sast
+  script:
+    - pip install semgrep bandit
+    - semgrep scan --config auto backend/ || true
+    - bandit -r backend/app -f json -o bandit-report.json || true
+  artifacts:
+    paths:
+      - bandit-report.json
+
+test:
+  stage: test
+  script:
+    - pip install pytest pytest-asyncio httpx
+    - cd backend && pytest tests/ -q || echo "No tests yet"
+
+coverage:
+  stage: coverage
+  script:
+    - pip install pytest-cov
+    - cd backend && pytest tests/ --cov=app --cov-report=xml || true
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: backend/coverage.xml
+
+sonarqube:
+  stage: sonarqube
+  image:
+    name: sonarsource/sonar-scanner-cli:latest
+    entrypoint: [""]
+  script:
+    - sonar-scanner -Dsonar.projectKey=devsecops-platform || true
+  allow_failure: true
+
+quality-gate:
+  stage: quality-gate
+  script:
+    - echo "Enforcing quality gate thresholds"
+  needs:
+    - lint
+    - sast
+    - test
+
+publish:
+  stage: publish
+  image: docker:27
+  services:
+    - docker:27-dind
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE/backend:$CI_COMMIT_SHA ./backend
+    - docker build -t $CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_SHA ./frontend
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"

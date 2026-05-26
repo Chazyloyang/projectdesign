@@ -1,0 +1,110 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-devsecops_platform}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform_secret}@postgres:5432/${POSTGRES_DB:-devsecops_platform}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform_secret}@postgres:5432/${POSTGRES_DB:-devsecops_platform}
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - scan_workspace:/workspace
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.worker
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform_secret}@postgres:5432/${POSTGRES_DB:-devsecops_platform}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform_secret}@postgres:5432/${POSTGRES_DB:-devsecops_platform}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - backend
+      - redis
+    volumes:
+      - scan_workspace:/workspace
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api
+        API_PROXY_TARGET: http://backend:8000
+    environment:
+      HOSTNAME: "0.0.0.0"
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ../devops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ../devops/grafana/provisioning:/etc/grafana/provisioning
+      - ../devops/grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
+  sonarqube:
+    image: sonarqube:10.6-community
+    environment:
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    ports:
+      - "9000:9000"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+
+volumes:
+  postgres_data:
+  sonarqube_data:
+  scan_workspace:

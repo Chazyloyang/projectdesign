@@ -1,0 +1,13 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/analytics/page": "app/analytics/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/login/page": "app/login/page.js",
+  "/page": "app/page.js",
+  "/pipelines/page": "app/pipelines/page.js",
+  "/register/page": "app/register/page.js",
+  "/reports/page": "app/reports/page.js",
+  "/repositories/page": "app/repositories/page.js",
+  "/settings/page": "app/settings/page.js",
+  "/vulnerabilities/page": "app/vulnerabilities/page.js"
+}
